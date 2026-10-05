@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+
 sIndex *index_new(void){
     sIndex *idx = calloc(1, sizeof(sIndex));
     if (!idx) return NULL;
@@ -117,36 +118,85 @@ static int fuzzy_match(const char *needle, const char *haystack) {
     score -= (int)strlen(haystack) / 8;
     return score;
 }
-
-size_t index_search(sIndex *idx, const char *term, sResult *out, size_t max_results) {
-    if (!idx || !term || !out || max_results == 0) return 0;
+static int glob_match(const char *pattern, const char *str) {
+    const char *target = str;
+    if (strchr(pattern, '/') == NULL) {
+        const char *slash = strrchr(str, '/');
+        if (slash) target = slash + 1;
+    }
+    const char *p = pattern;
+    const char *s = target;
+    if (p[0] == '*' && p[1] == '\0') return 1;
+    if (p[0] == '*') {
+        const char *rest = p + 1;
+        size_t rlen = strlen(rest), slen = strlen(s);
+        if (rlen > slen) return 0;
+        return strcmp(s + slen - rlen, rest) == 0;
+    }
+    size_t plen = strlen(p);
+    if (plen > 0 && p[plen - 1] == '*')
+        return strncmp(s, p, plen - 1) == 0;
+    if (strchr(p, '*') != NULL) {
+        char pre[PATH_MAX], suf[PATH_MAX];
+        const char *star = strchr(p, '*');
+        size_t pre_len = (size_t)(star - p);
+        const char *after = star + 1;
+        if (pre_len >= PATH_MAX) return 0;
+        memcpy(pre, p, pre_len); pre[pre_len] = '\0';
+        strncpy(suf, after, PATH_MAX - 1); suf[PATH_MAX - 1] = '\0';
+        if (strncmp(s, pre, pre_len) != 0) return 0;
+        size_t slen = strlen(s), suflen = strlen(suf);
+        if (suflen > slen - pre_len) return 0;
+        return strcmp(s + slen - suflen, suf) == 0;
+    }
+    return strcmp(p, s) == 0;
+}
+size_t index_search(sIndex *idx, const char **terms, size_t nterms, sResult *out, size_t max_results) {
+    if (!idx || !terms || nterms == 0 || !out || max_results == 0) return 0;
 
     size_t n = 0;
 
     for (size_t i = 0; i < idx->capacity; i++) {
         for (sEntry *e = idx->buckets[i]; e; e = e->next) {
-            int score = fuzzy_match(term, e->path);
-            if (score < 0) continue;
+            int best = -1;
+
+            for (size_t t = 0; t < nterms; t++) {
+                const char *term = terms[t];
+                int s;
+
+                if (term[0] == '.' && strchr(term, '*') == NULL) {
+                    const char *slash = strrchr(e->path, '/');
+                    const char *base = slash ? slash + 1 : e->path;
+                    size_t tlen = strlen(term), blen = strlen(base);
+                    s = (blen >= tlen && strcmp(base + blen - tlen, term) == 0) ? 100 : -1;
+                } else if (strchr(term, '*') != NULL) {
+                    s = glob_match(term, e->path) ? 100 : -1;
+                } else {
+                    s = fuzzy_match(term, e->path);
+                }
+
+                if (s > best) best = s;
+            }
+
+            if (best < 0) continue;
 
             if (n < max_results) {
-                strncpy(out[n].path, e->path, PATH_MAX - 1);
-                out[n].path[PATH_MAX - 1] = '\0';
-                out[n].score = score;
+                out[n].path = e->path;
+                out[n].score = best;
                 n++;
             } else {
                 size_t worst = 0;
                 for (size_t k = 1; k < max_results; k++) {
-                    if (out[k].score < out[worst].score)
-                        worst = k;
+                    if (out[k].score < out[worst].score) worst = k;
                 }
-                if (score > out[worst].score) {
-                    strncpy(out[worst].path, e->path, PATH_MAX - 1);
-                    out[worst].path[PATH_MAX - 1] = '\0';
-                    out[worst].score = score;
+                if (best > out[worst].score) {
+                    out[worst].path = e->path;
+                    out[worst].score = best;
                 }
             }
         }
     }
+
     for (size_t i = 1; i < n; i++) {
         sResult key = out[i];
         size_t j = i;
@@ -159,4 +209,3 @@ size_t index_search(sIndex *idx, const char *term, sResult *out, size_t max_resu
 
     return n;
 }
-      	

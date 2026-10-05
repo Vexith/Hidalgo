@@ -15,7 +15,7 @@ typedef struct {
 } sFile;
 
 typedef struct {
-    char path[PATH_MAX];
+    const char *path;
     int score;
 } sResult;
 
@@ -26,7 +26,7 @@ bool index_add(sIndex *idx, const sFile *file);
 bool index_remove(sIndex *idx, const char *path);
 size_t index_scan(sIndex *idx, const char *root);
 
-size_t index_search(sIndex *idx, const char *term, sResult *out, size_t max_results);
+size_t index_search(sIndex *idx, const char **terms, size_t nterms, sResult *out, size_t max_results); 
 size_t index_count(const sIndex *idx);
 
 #endif
