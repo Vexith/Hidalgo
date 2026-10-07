@@ -4,6 +4,7 @@
 #include <string.h>
 #include <time.h>
 #include "util.h"
+#include "cache.h"
 
 static void usage(const char *prog) {
      fprintf(stderr, "use:\n" " %s [OPTIONS] <path> <term>\n", prog);
@@ -44,6 +45,7 @@ int main(int argc, char **argv) {
 
     if (nterms < 1) { usage(argv[0]); return 2; }
     sIndex *idx = index_new();
+    cache_load(idx, root);
     if (!idx) { fprintf(stderr, "no memory\n"); return 1; }
 
     double t0 = sNow();
@@ -66,7 +68,7 @@ int main(int argc, char **argv) {
     	printf("[%4d] %s\n", results[i].score, results[i].path);
 
     fprintf(stderr, "%zu results in %.3f s\n", hits, t3 - t2);
-
+    cache_save(idx, root);
     index_free(idx);
     return 0;
 }

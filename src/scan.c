@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "hidalgo.h"
 #include "util.h"
+#include "cache.h"
 #include <dirent.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -8,6 +9,22 @@
 #include <pthread.h>
 
 #define N_THREADS 4
+
+static const char *SKIP_DIRS[] = {
+    "/proc",
+    "/sys",
+    "/dev",
+    "/run",
+    "/tmp",
+    "/var/cache",
+    "/var/tmp",
+    "/var/log",
+    "/var/lib/flatpak",
+    "/snap",
+    "/boot",
+    "/lost+found",
+    NULL
+};
 
 typedef struct QueueNode {
 	char path[PATH_MAX];
@@ -30,6 +47,21 @@ typedef struct {
     size_t added;
 } Worker;
 
+static int should_skip(const char *path) {
+    for (int i = 0; SKIP_DIRS[i]; i++) {
+    	size_t len = strlen(SKIP_DIRS[i]);
+    	if (strncmp(path, SKIP_DIRS[i], len) == 0) {
+    	    if (path[len] == '\0' || path[len] == '/') {
+    	    	return 1;}
+    	}
+    }
+    return 0;
+}
+
+static int is_cached(const char *path, uint64_t current_mtime) {
+    uint64_t cached = cache_dir_mtime(path);
+    return cached != 0 && cached == current_mtime;
+}
 static void queue_init(WorkQueue *q) {
     q->head = q->tail = NULL;
     q->active = 0;
@@ -89,6 +121,27 @@ static void *worker_main(void *arg) {
     char path[PATH_MAX];
     
     while (queue_pop(w->q, path)) {
+    	if (should_skip(path)) {
+    	   queue_finishitem(w->q);
+    	   continue;
+    	}
+    	struct stat dst;
+    	if (stat(path, &dst) < 0) {
+    	    queue_finishitem(w->q);
+    	    continue;
+    	}
+    	
+    	uint64_t dir_mtime = (uint64_t)dst.st_mtime;
+    	
+    	int cached = is_cached(path, dir_mtime);
+    	
+    	if (cached) {
+    	   cache_record_dir(path, dir_mtime);
+    	   queue_finishitem(w->q);
+    	   continue;
+    	}
+    	
+    	   
     	DIR *d = opendir(path);
     	if (d) {
     	   struct dirent *e;
@@ -122,6 +175,7 @@ static void *worker_main(void *arg) {
     	    }
     	    closedir(d);
     	}
+    	cache_record_dir(path, dir_mtime);
     	queue_finishitem(w->q);
      }
      return NULL;
