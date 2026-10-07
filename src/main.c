@@ -8,7 +8,7 @@
 
 static void usage(const char *prog) {
      fprintf(stderr, "use:\n" " %s [OPTIONS] <path> <term>\n", prog);
-     fprintf(stderr, "  -n N max results (default: 20, 0 = all)\n");
+     fprintf(stderr, "  -n N max results (default: 0, 0 = all)\n");
 }
 
 int main(int argc, char **argv) {
